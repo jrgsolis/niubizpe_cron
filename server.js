@@ -6,8 +6,22 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Data Configuration
-// In production, you might pull these from a database or environment variables
+// --- 1. LOGGING STORAGE ---
+// This stores logs in memory. Note: They reset if Railway restarts.
+let paymentLogs = [];
+
+function addLog(type, status, detail, transactionId = 'N/A') {
+  const entry = {
+    timestamp: new Date().toLocaleString("en-US", { timeZone: "America/New_York" }),
+    type: type, // 'AUTO' or 'MANUAL'
+    status: status,
+    detail: detail,
+    transactionId: transactionId
+  };
+  paymentLogs.unshift(entry); // Add new logs to the top
+  if (paymentLogs.length > 50) paymentLogs.pop(); // Keep only the last 50
+}
+
 const customerData = {
   firstName: "John",
   lastName: "Doe",
@@ -26,45 +40,96 @@ const cardData = {
   expirationYear: "2031"
 };
 
-// 2. Hourly Scheduled Task
-// '0 * * * *' triggers at the start of every hour
+// --- 2. HOURLY SCHEDULED TASK ---
 cron.schedule('0 * * * *', async () => {
-  console.log(`[${new Date().toISOString()}] 🕒 AUTO-TRIGGER: Starting hourly payment...`);
+  console.log(`[${new Date().toISOString()}] 🕒 AUTO-TRIGGER: Starting...`);
   
   try {
     const result = await cybersource.processPayment("10.00", "PEN", customerData, cardData);
+    const isAuth = result.status === 'AUTHORIZED';
     
-    if (result.status === 'AUTHORIZED') {
-      console.log(`✅ Hourly Success: Transaction ID ${result.id}`);
-    } else {
-      console.error(`⚠️ Hourly Declined: Status ${result.status}`);
-    }
+    addLog('AUTO', isAuth ? 'SUCCESS' : 'DECLINED', isAuth ? 'Hourly Payment' : result.status, result.id || 'N/A');
+    console.log(isAuth ? `✅ Success: ${result.id}` : `⚠️ Declined: ${result.status}`);
   } catch (err) {
-    console.error('💥 Hourly Cron Error:', err.message);
+    addLog('AUTO', 'ERROR', err.message);
+    console.error('💥 Cron Error:', err.message);
   }
 }, {
   scheduled: true,
-  timezone: "America/New_York" // Set to your local time (Doral/Eastern)
+  timezone: "America/New_York"
 });
 
-// 3. Web Routes
+// --- 3. WEB ROUTES ---
+
+// Dashboard View
 app.get('/', (req, res) => {
-  res.send('Cybersource Hourly Worker is Active.');
+  const rows = paymentLogs.map(log => `
+    <tr>
+      <td>${log.timestamp}</td>
+      <td><strong>${log.type}</strong></td>
+      <td><span class="status-${log.status.toLowerCase()}">${log.status}</span></td>
+      <td>${log.detail}</td>
+      <td><code>${log.transactionId}</code></td>
+    </tr>
+  `).join('');
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Niubiz Cron Monitor</title>
+      <meta http-equiv="refresh" content="30">
+      <style>
+        body { font-family: -apple-system, sans-serif; padding: 40px; background: #f8f9fa; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f1f1f1; }
+        .status-success { color: #27ae60; font-weight: bold; }
+        .status-declined { color: #e67e22; font-weight: bold; }
+        .status-error { color: #c0392b; font-weight: bold; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h2>Payment Activity Monitor</h2>
+          <small>Auto-refreshes every 30s</small>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time (ET)</th>
+              <th>Trigger</th>
+              <th>Status</th>
+              <th>Detail</th>
+              <th>Transaction ID</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="5" style="text-align:center;">Waiting for first transaction...</td></tr>'}</tbody>
+        </table>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
-// Manual trigger for testing: curl -X POST http://localhost:3000/manual-trigger
+// Manual Trigger
 app.post('/manual-trigger', async (req, res) => {
-  console.log(`[${new Date().toISOString()}] ⚡ MANUAL-TRIGGER: Processing request...`);
-  
+  console.log(`[${new Date().toISOString()}] ⚡ MANUAL-TRIGGER: Processing...`);
   try {
     const result = await cybersource.processPayment("10.00", "PEN", customerData, cardData);
+    const isAuth = result.status === 'AUTHORIZED';
+    
+    addLog('MANUAL', isAuth ? 'SUCCESS' : 'DECLINED', isAuth ? 'Manual Test' : result.status, result.id || 'N/A');
     res.json(result);
   } catch (err) {
+    addLog('MANUAL', 'ERROR', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server active on port ${PORT}`);
-  console.log(`📅 Hourly schedule initialized (Top of the hour)`);
+  console.log(`🚀 Server monitoring active on port ${PORT}`);
 });
