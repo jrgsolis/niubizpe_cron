@@ -40,16 +40,16 @@ const cardData = {
   expirationYear: "2031"
 };
 
-// --- 2. 15-MINUTE SCHEDULED TASK ---
-// '*/15 * * * *' triggers every 15 minutes (0, 15, 30, 45)
-cron.schedule('*/15 * * * *', async () => {
-  console.log(`[${new Date().toISOString()}] 🕒 AUTO-TRIGGER: Starting 15-minute payment...`);
+// --- 2. HOURLY SCHEDULED TASK ---
+// '0 * * * *' triggers at the start of every hour.
+cron.schedule('0 * * * *', async () => {
+  console.log(`[${new Date().toISOString()}] 🕒 AUTO-TRIGGER: Starting hourly payment...`);
   
   try {
     const result = await cybersource.processPayment("10.00", "PEN", customerData, cardData);
     const isAuth = result.status === 'AUTHORIZED';
     
-    addLog('AUTO', isAuth ? 'SUCCESS' : 'DECLINED', isAuth ? '15-Min Payment' : result.status, result.id || 'N/A');
+    addLog('AUTO', isAuth ? 'SUCCESS' : 'DECLINED', isAuth ? 'Hourly Payment' : result.status, result.id || 'N/A');
     console.log(isAuth ? `✅ Success: ${result.id}` : `⚠️ Declined: ${result.status}`);
   } catch (err) {
     addLog('AUTO', 'ERROR', err.message);
