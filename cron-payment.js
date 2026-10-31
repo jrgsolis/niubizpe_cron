@@ -1,47 +1,31 @@
-const cybersource = require('./cybersourceService');
+const { runAllPayloads, payloadLabel, payloads } = require('./paymentRunner');
+const { buildContexts } = require('./environments');
 require('dotenv').config();
 
+// One-off run of every payload in payloads.json
+// Usage: node cron-payment.js [int|cert|release|uat|all]   (default: all)
 async function runScheduledPayment() {
-  console.log(`[${new Date().toISOString()}] Manual Execution Started...`);
+  const target = (process.argv[2] || 'all').toLowerCase();
+  const contexts = buildContexts().filter(c => target === 'all' || c.key === target);
+  if (contexts.length === 0) {
+    console.error(`💥 No configured environment matches "${target}"`);
+    process.exit(1);
+  }
 
-  // 1. Define the dynamic data
-  const amount = "10.00"; 
-  const currency = "PEN";
-
-  const customerData = {
-    firstName: "John",
-    lastName: "Doe",
-    address1: "1 Market St",
-    locality: "San Francisco",
-    administrativeArea: "CA",
-    postalCode: "94105",
-    country: "US",
-    email: "test@cybs.com",
-    phone: "4158880000"
-  };
-
-  const cardData = {
-    number: process.env.TEST_CARD_NUMBER || "4111111111111111",
-    expirationMonth: "12",
-    expirationYear: "2031"
-  };
-
-  // 2. Execute with the new 4-argument signature
   try {
-    const result = await cybersource.processPayment(
-      amount, 
-      currency, 
-      customerData, 
-      cardData
-    );
-    
-    if (result.status === 'AUTHORIZED') {
-      console.log(`✅ Success! Transaction ID: ${result.id}`);
-    } else {
-      console.error('❌ Payment Refused:', JSON.stringify(result, null, 2));
+    for (const ctx of contexts) {
+      console.log(`[${new Date().toISOString()}] [${ctx.name}] Manual Execution Started (${payloads.length} payloads)...`);
+      await runAllPayloads(ctx, (p, i, result, err) => {
+        const label = `[${ctx.name}] ${payloadLabel(p, i)}`;
+        if (err) {
+          console.error(`💥 ${label} Failure:`, err.message);
+        } else if (result.status === 'AUTHORIZED') {
+          console.log(`✅ ${label} Success! Transaction ID: ${result.id}`);
+        } else {
+          console.error(`❌ ${label} Refused:`, JSON.stringify(result, null, 2));
+        }
+      });
     }
-  } catch (err) {
-    console.error('💥 Critical Failure:', err.message);
   } finally {
     // IMPORTANT: Since this is a standalone script, we must exit.
     // If this were server.js, we would NOT call process.exit.

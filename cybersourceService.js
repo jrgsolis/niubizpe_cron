@@ -1,25 +1,25 @@
 const cybersourceRestApi = require('cybersource-rest-client');
-require('dotenv').config();
 
+// One instance per environment (see environments.js)
 class CybersourceService {
-  constructor() {
+  constructor({ runEnvironment, merchantID, merchantKeyId, merchantsecretKey }) {
     this.config = {
       authenticationType: 'http_signature',
-      runEnvironment: 'apitest.cybersource.com', // or 'api.cybersource.com' for prod
-      merchantID: process.env.CYBS_MERCHANT_ID.trim(),
-      merchantKeyId: process.env.CYBS_KEY_ID.trim(),
-      merchantsecretKey: process.env.CYBS_SECRET_KEY.trim(),
+      runEnvironment, // 'apitest.cybersource.com' for test, 'api.cybersource.com' for prod
+      merchantID,
+      merchantKeyId,
+      merchantsecretKey,
       logConfiguration: {
         enableLog: false
       }
     };
   }
 
-  async processPayment(amount, currency, customerData, cardData) {
+  async processPayment(amount, currency, customerData, cardData, reference = '') {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
     const clientReferenceInformation = new cybersourceRestApi.Ptsv2paymentsClientReferenceInformation();
-    clientReferenceInformation.code = `SDK_PAY_${timestamp}`;
+    clientReferenceInformation.code = `SDK_PAY_${timestamp}${reference ? `_${reference}` : ''}`;
 
     const processingInformation = new cybersourceRestApi.Ptsv2paymentsProcessingInformation();
     processingInformation.capture = true;
@@ -47,6 +47,7 @@ class CybersourceService {
     card.number = cardData.number.replace(/\s/g, '');
     card.expirationMonth = cardData.expirationMonth.toString().padStart(2, '0');
     card.expirationYear = cardData.expirationYear.toString();
+    if (cardData.type) card.type = cardData.type;
 
     const paymentInformation = new cybersourceRestApi.Ptsv2paymentsPaymentInformation();
     paymentInformation.card = card;
@@ -73,6 +74,24 @@ class CybersourceService {
       });
     });
   }
+
+  // Sends a raw CreatePaymentRequest body (plain JSON) as-is
+  async sendPayment(requestBody) {
+    const instance = new cybersourceRestApi.PaymentsApi(this.config);
+
+    return new Promise((resolve) => {
+      console.log(`--- SDK: SENDING ${requestBody.clientReferenceInformation?.code || 'PAYLOAD'} ---`);
+      instance.createPayment(requestBody, (error, data) => {
+        if (error) {
+          console.error("❌ SDK ERROR:", JSON.stringify(error, null, 2));
+          resolve(error.response ? JSON.parse(error.response.text) : error);
+        } else {
+          console.log("✅ SDK SUCCESS!");
+          resolve(data);
+        }
+      });
+    });
+  }
 }
 
-module.exports = new CybersourceService();
+module.exports = CybersourceService;
